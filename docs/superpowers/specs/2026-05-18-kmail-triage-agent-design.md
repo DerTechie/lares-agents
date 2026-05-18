@@ -187,8 +187,8 @@ Runs `ruff check`, `ruff format --check`, `pyright`, `pytest -m "not integration
 
 ### `lares-akonadi-notify`
 
-- **Invocation:** `lares-akonadi-notify --mimetype message/rfc822 --collection-attr inbox`
-- **Behavior:** instantiates `Akonadi::Monitor`, filters to `MessageMimeType("message/rfc822")` and to collections whose `SpecialCollectionAttribute::Type == "inbox"`. Auto-reconnects on Akonadi server restart.
+- **Invocation:** `lares-akonadi-notify --mimetype message/rfc822 --collection-attr inbox [--extra-collection NAME ...]`. `--extra-collection` is repeatable and defaults to empty; it widens the filter to include collections by display name even if they lack the requested `SpecialCollectionAttribute` (escape hatch for custom landing folders mentioned in §15).
+- **Behavior:** instantiates `Akonadi::Monitor`, filters to `MessageMimeType("message/rfc822")` and to collections whose `SpecialCollectionAttribute::Type == "inbox"`. Auto-reconnects on Akonadi server restart — the implementation must connect to `Akonadi::ServerManager::stateChanged` and re-apply `setMimeTypeMonitored` on transitions to `Running`. (`Akonadi::Monitor` re-establishes its session internally but does not guarantee filter restoration after a server bounce.)
 - **Output:** one NDJSON line per `itemAdded(Item, Collection)` signal to stdout, flushed immediately:
   ```json
   {"event":"item_added","item_id":12345,"collection_id":42,"remote_id":"<message-id>","mimetype":"message/rfc822","ts":"2026-05-18T17:42:11Z"}

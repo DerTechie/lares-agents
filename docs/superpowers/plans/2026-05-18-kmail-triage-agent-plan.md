@@ -2459,6 +2459,15 @@ git commit -m "test(kmail): add four synthetic .eml fixtures (DE/EN mix, fake do
 
 ```cmake
 # SPDX-License-Identifier: MIT
+
+# extra-cmake-modules ships helper modules (ECMMarkAsTest, ECMGenerateExportHeader,
+# KDEInstallDirs, …) that KPim6Akonadi's installed CMake config transitively
+# `include()`s. Loading ECM up front and pushing its module path onto
+# CMAKE_MODULE_PATH is the canonical KF6/KPim6 consumer preamble; without it,
+# `find_package(KPim6Akonadi)` configures but the transitive includes fail.
+find_package(ECM REQUIRED NO_MODULE)
+list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+
 find_package(Qt6 REQUIRED COMPONENTS Core DBus)
 find_package(KPim6Akonadi REQUIRED)
 
@@ -2582,9 +2591,16 @@ Expected: CMake configures, finds Qt6 + KPim6Akonadi, compiles `lares-akonadi-no
 
 - [ ] **Step 4: Smoke-check the binary is in the wheel layout**
 
-Run: `python -c "from importlib.resources import files; print(files('lares') / '_bin' / 'lares-akonadi-notify')"`
+`uv sync` performs an *editable* install: scikit-build-core does not run CMake in editable mode and does not surface CMake-installed artifacts under `importlib.resources.files('lares')`. The smoke check therefore needs a real wheel build:
 
-Expected: prints a path; `os.path.exists` of that path is True.
+```bash
+uv build --wheel --out-dir /tmp/lares-wheel-check
+uv venv /tmp/lares-wheel-venv
+/tmp/lares-wheel-venv/bin/python -m pip install /tmp/lares-wheel-check/lares-*.whl
+/tmp/lares-wheel-venv/bin/python -c "from importlib.resources import files; p = files('lares') / '_bin' / 'lares-akonadi-notify'; print(p, p.is_file())"
+```
+
+Expected: prints a path; `p.is_file()` is `True`; the file is mode `0755`.
 
 - [ ] **Step 5: Quality gates (Python checks unchanged)**
 
