@@ -12,14 +12,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import NoReturn
 
+import httpx
+
 from lares.kmail import service
 from lares.kmail.config import LaresConfig, load_config
+from lares.kmail.state import State
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,55 @@ def _cmd_kmail_run(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_kmail_status(ns: argparse.Namespace) -> int:
+    cfg = _load(ns)
+    state = State(cfg.kmail.state_db_path)
+    try:
+        depth = state.queue_depth()
+        max_id = state.max_item_id()
+    finally:
+        state.close()
+    report: dict[str, object] = {
+        "queue_depth": depth,
+        "last_seen_item_id": max_id,
+        "state_db_path": str(cfg.kmail.state_db_path),
+    }
+    if getattr(ns, "json", False):
+        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+    else:
+        sys.stdout.write(
+            f"lares kmail status\n"
+            f"  state db: {report['state_db_path']}\n"
+            f"  queue depth: {depth}\n"
+            f"  last seen item id: {max_id}\n"
+        )
+    return 0
+
+
+def _cmd_kmail_config_check(ns: argparse.Namespace) -> int:
+    cfg = _load(ns)
+    fails: list[str] = []
+    try:
+        with httpx.Client(base_url=cfg.lares.ollama.endpoint, timeout=5.0) as client:
+            resp = client.get("/api/tags")
+            resp.raise_for_status()
+            available = {m.get("name") for m in resp.json().get("models", [])}
+            if cfg.lares.ollama.model not in available:
+                fails.append(
+                    f'Ollama model "{cfg.lares.ollama.model}" not pulled.\n'
+                    f"  Fix:  ollama pull {cfg.lares.ollama.model}"
+                )
+    except httpx.HTTPError as exc:
+        fails.append(f"Ollama not reachable at {cfg.lares.ollama.endpoint}: {exc}")
+
+    if fails:
+        for msg in fails:
+            sys.stdout.write(f"✗ {msg}\n")
+        return 1
+    sys.stdout.write("✓ config valid; ollama reachable; model pulled.\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lares")
     parser.add_argument(
@@ -67,6 +120,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = kmail_sub.add_parser("run", help="run the triage service (foreground)")
     run.set_defaults(func=_cmd_kmail_run)
+
+    status = kmail_sub.add_parser("status", help="print service state")
+    status.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    status.set_defaults(func=_cmd_kmail_status)
+
+    cfg_check = kmail_sub.add_parser("config-check", help="validate config + preflight")
+    cfg_check.set_defaults(func=_cmd_kmail_config_check)
 
     return parser
 
