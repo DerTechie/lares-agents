@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from lares.kmail.cli import (
     _cmd_kmail_config_check,  # pyright: ignore[reportPrivateUsage]
+    _cmd_kmail_purge,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_status,  # pyright: ignore[reportPrivateUsage]
     build_parser,
     default_config_path,
@@ -127,6 +128,65 @@ async def test_config_check_reports_missing_model(
     out = capsys.readouterr().out
     assert rc != 0
     assert "ollama pull m" in out
+
+
+def test_parser_dispatches_kmail_backfill() -> None:
+    parser = build_parser()
+    ns = parser.parse_args(["kmail", "backfill", "--limit", "5", "--dry-run"])
+    assert ns.func.__name__ == "_cmd_kmail_backfill"
+    assert ns.limit == 5
+    assert ns.dry_run is True
+
+
+def test_parser_dispatches_kmail_catchup() -> None:
+    parser = build_parser()
+    ns = parser.parse_args(["kmail", "catchup", "--since", "42"])
+    assert ns.func.__name__ == "_cmd_kmail_catchup"
+    assert ns.since == 42
+
+
+def test_parser_dispatches_kmail_retag() -> None:
+    parser = build_parser()
+    ns = parser.parse_args(["kmail", "retag", "42", "--remove"])
+    assert ns.func.__name__ == "_cmd_kmail_retag"
+    assert ns.item_id == 42
+    assert ns.remove is True
+
+
+def test_parser_dispatches_kmail_purge_requires_confirm() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["kmail", "purge"])  # missing --confirm
+
+
+def test_kmail_purge_removes_sqlite(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.toml"
+    db = tmp_path / "state.db"
+    cfg_file.write_text(
+        f"""
+[lares.ollama]
+model = "m"
+
+[kmail]
+state_db_path = "{db}"
+
+[kmail.tags]
+personal = "x"
+business = "x"
+newsletter = "x"
+notification = "x"
+"""
+    )
+    State(db).close()
+    assert db.exists()
+
+    class _NS:
+        config = cfg_file
+        confirm = True
+
+    rc = _cmd_kmail_purge(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    assert not db.exists()
 
 
 def _cfg_toml(cfg: LaresConfig) -> str:
