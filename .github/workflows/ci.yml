@@ -11,24 +11,28 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Qt6 / KF6 / build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build extra-cmake-modules \
+            libkf6akonadi-dev qt6-base-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
-          # Default cache key globs **/uv.lock; we haven't generated one yet,
-          # so key on pyproject.toml until `uv lock` lands.
-          cache-dependency-glob: "pyproject.toml"
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python 3.12
         run: uv python install 3.12
 
       - name: Install dependencies
-        # TODO: switch to `uv sync --frozen` once `uv.lock` is generated and committed.
-        run: uv sync
+        run: uv sync --frozen
 
       - name: ruff check
         run: uv run ruff check .
