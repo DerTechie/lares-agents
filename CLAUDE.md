@@ -8,10 +8,11 @@
 
 The single public Python project that implements the Lares agents. Internal module layout (planned — modules land as features arrive, not before):
 
-- `lares.kmail` — Akonadi triage agent (`systemd --user` service, D-Bus to Akonadi).
-- `lares.krunner` — KRunner LLM action, shipped as a long-running `systemd --user` D-Bus daemon speaking `org.kde.krunner1`. KRunner discovers it via a `.service` + `.desktop` pair; there is no separate compiled plugin. Python cannot host a first-class KRunner `KPlugin` — this is a known tradeoff.
-- `lares.core` — shared Ollama client, config loader, logging.
-- `lares.cli` — `lares` CLI for inspection, agent control, debugging.
+- `lares.kmail` — Akonadi triage agent (`systemd --user` service). Talks to Akonadi via two small C++/Qt6 helper binaries (`lares-akonadi-notify`, `lares-akonadi-mutate`) shipped inside the wheel — see `docs/superpowers/specs/2026-05-18-kmail-triage-agent-design.md` for the rationale (no Python binding to Akonadi exists; D-Bus alone can't carry the notification stream or apply tags). Python owns all policy.
+- `src/akonadi_bridge/` — the two C++ helpers (source-only; built and installed into `src/lares/_bin/` by `scikit-build-core`).
+- `lares.krunner` — KRunner LLM action (planned).
+- `lares.core` — shared Ollama client, config loader, logging (deferred until a second agent exists; root §2 of the overlord).
+- `lares.cli` — `lares` CLI for inspection, agent control, debugging (currently lives at `lares.kmail.cli`; promoted when the second agent lands).
 
 Monorepo until size or coupling forces a split. A second concrete implementation must exist before introducing abstractions.
 
@@ -25,6 +26,7 @@ Monorepo until size or coupling forces a split. A second concrete implementation
 - **D-Bus is the IPC.** Akonadi and KRunner integration use D-Bus. No invented IPC, no socket-based shims unless D-Bus genuinely cannot do it.
 - **No personal data in test fixtures.** Synthetic mail / synthetic input only. CI must never see a real mailbox.
 - **Python 3.12+, `uv` for deps, `ruff` for lint, `pytest` for tests.** Lockfile committed.
+- Build backend is **`scikit-build-core`** (PEP 517), not `hatchling`. The wheel ships both Python and the C++ bridge helpers; CMake config lives at the repo root and under `src/akonadi_bridge/`.
 
 ---
 
