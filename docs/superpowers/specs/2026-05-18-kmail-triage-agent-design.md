@@ -72,7 +72,7 @@ The user's stated motivation: scan past newsletter clutter quickly and have busi
 
 ### Invariants
 
-- The two C++ helpers are the **only** code that links against `KF6::AkonadiCore`. They are stateless, narrow, and ignorant of LLMs, tag semantics, queues, or policy.
+- The two C++ helpers are the **only** code that links against `KPim6::AkonadiCore`. They are stateless, narrow, and ignorant of LLMs, tag semantics, queues, or policy.
 - The Python service owns all policy: what to tag, when to retry, what constitutes pending, what to classify.
 - One systemd `--user` service supervises both C++ subprocesses (restart on exit) and the asyncio main loop.
 
@@ -161,17 +161,24 @@ Promoted to a dispatcher when the second agent (KRunner) lands.
 
 - `cmake`, `ninja`, C++17 compiler — `base-devel` on Arch
 - `extra-cmake-modules`
-- `kf6-akonadi`, `qt6-base` — present on any Plasma 6 desktop
+- `kpim6-akonadi`, `kpim6-mime`, `qt6-base` — present on any Plasma 6 desktop with KDE PIM 6 installed
 
 Documented in README. Arch one-liner: `sudo pacman -S --needed base-devel cmake ninja extra-cmake-modules`.
 
 ### CI
 
-`.github/workflows/ci.yml` adds:
+GitHub Actions hosted runners (currently Ubuntu Noble 24.04) ship only KDE 5 PIM packages — no `KPim6Akonadi` / `KPim6Mime` are available there. The CI job therefore runs inside an `ubuntu:25.10` container, which is the first Ubuntu release with KDE 6 PIM packaged under their non-prefixed Debian names (`libakonadi-dev`, `libkmime-dev`, both shipping `KPim6*` CMake config). `.github/workflows/ci.yml` adds:
 
 ```yaml
-- run: sudo apt-get install -y cmake ninja-build extra-cmake-modules libkf6akonadi-dev qt6-base-dev
-- run: uv sync     # builds C++ via scikit-build-core
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: ubuntu:25.10
+    steps:
+      - run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git
+      - uses: actions/checkout@v4
+      - run: apt-get install -y --no-install-recommends build-essential cmake ninja-build extra-cmake-modules qt6-base-dev libakonadi-dev libkmime-dev
+      - run: uv sync     # builds C++ via scikit-build-core
 ```
 
 Runs `ruff check`, `ruff format --check`, `pyright`, `pytest -m "not integration"`. Integration suite runs on `workflow_dispatch` + nightly.

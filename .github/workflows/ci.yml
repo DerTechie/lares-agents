@@ -11,16 +11,22 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    container: ubuntu:25.10
     timeout-minutes: 15
     steps:
+      - name: Install base tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git
+
       - uses: actions/checkout@v4
 
-      - name: Install Qt6 / KF6 / build tools
+      - name: Install Qt6 / KPim6 / build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build extra-cmake-modules \
-            libkf6akonadi-dev qt6-base-dev
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build extra-cmake-modules \
+            qt6-base-dev libakonadi-dev libkmime-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3

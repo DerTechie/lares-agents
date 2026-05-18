@@ -6,7 +6,7 @@
 
 **Architecture:** Two small C++/Qt6 helper binaries (`lares-akonadi-notify`, `lares-akonadi-mutate`) own the Akonadi C++ API surface and expose JSON/NDJSON line protocols on stdio. A Python asyncio service supervises them as subprocesses, owns all policy (taxonomy, retry, backoff, persistence), classifies via Ollama's structured-output endpoint, and applies Akonadi tags via the mutate helper. Build via `scikit-build-core` so `uv tool install lares` builds and ships both languages atomically.
 
-**Tech Stack:** Python 3.12 (asyncio, sqlite3, tomllib, argparse, importlib.resources), httpx (Ollama HTTP), pydantic v2 (config validation, response parsing), Qt6 + KF6::AkonadiCore (C++ helpers), CMake + scikit-build-core (build), ruff + pyright + pytest + pytest-asyncio + pytest-httpx + freezegun (dev tools).
+**Tech Stack:** Python 3.12 (asyncio, sqlite3, tomllib, argparse, importlib.resources), httpx (Ollama HTTP), pydantic v2 (config validation, response parsing), Qt6 + KPim6::AkonadiCore + KPim6::Mime (C++ helpers), CMake + scikit-build-core (build), ruff + pyright + pytest + pytest-asyncio + pytest-httpx + freezegun (dev tools).
 
 **Conventions:**
 - Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`).
@@ -247,27 +247,16 @@ buildable while we lay groundwork for the C++ helpers."
 
 ---
 
-## Task 3 — Update CI to install Qt6 / KF6 / cmake / ninja
+## Task 3 — Update CI to install Qt6 / KPim6 / cmake / ninja
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
 
-**Why:** Spec §4 requires CI to build the C++ helpers on every PR so compile breakage surfaces early. The runner needs `cmake`, `ninja-build`, `extra-cmake-modules`, `libkf6akonadi-dev`, `qt6-base-dev`. Even before Task 12 lands real C++, having the deps installed is a no-op cost and avoids a later "CI broke" commit.
+**Why:** Spec §4 requires CI to build the C++ helpers on every PR so compile breakage surfaces early. KDE 6 PIM (`KPim6Akonadi`, `KPim6Mime`) is **not packaged on Ubuntu Noble 24.04 (`ubuntu-latest`'s current image)** — only KDE 5 is. The first Ubuntu suite that ships them is 25.10 (Questing), where they live in the unprefixed Debian packages `libakonadi-dev` and `libkmime-dev` (both ship `KPim6*Config.cmake` files). The CI job therefore runs inside an `ubuntu:25.10` container hosted by a `ubuntu-latest` runner. Even before Task 12 lands real C++, having the deps installed is a no-op cost and avoids a later "CI broke" commit.
 
 - [ ] **Step 1: Edit `.github/workflows/ci.yml`**
 
-Insert a new step before "Install uv":
-
-```yaml
-      - name: Install Qt6 / KF6 / build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build extra-cmake-modules \
-            libkf6akonadi-dev qt6-base-dev
-```
-
-The full file becomes:
+The job switches to a container-based job. The container starts as root (no `sudo`), so we install the base bootstrap tooling (`git`, `curl`, `ca-certificates`) before `actions/checkout@v4` runs, then the KDE 6 deps. The full file becomes:
 
 ```yaml
 name: ci
@@ -283,28 +272,34 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    container: ubuntu:25.10
     timeout-minutes: 15
     steps:
+      - name: Install base tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git
+
       - uses: actions/checkout@v4
 
-      - name: Install Qt6 / KF6 / build tools
+      - name: Install Qt6 / KPim6 / build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build extra-cmake-modules \
-            libkf6akonadi-dev qt6-base-dev
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build extra-cmake-modules \
+            qt6-base-dev libakonadi-dev libkmime-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python 3.12
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: ruff check
         run: uv run ruff check .
@@ -2465,14 +2460,14 @@ git commit -m "test(kmail): add four synthetic .eml fixtures (DE/EN mix, fake do
 ```cmake
 # SPDX-License-Identifier: MIT
 find_package(Qt6 REQUIRED COMPONENTS Core DBus)
-find_package(KF6Akonadi REQUIRED)
+find_package(KPim6Akonadi REQUIRED)
 
 add_executable(lares-akonadi-notify notify.cpp)
 target_link_libraries(lares-akonadi-notify
     PRIVATE
         Qt6::Core
         Qt6::DBus
-        KF6::AkonadiCore
+        KPim6::AkonadiCore
 )
 target_compile_features(lares-akonadi-notify PRIVATE cxx_std_17)
 
@@ -2583,7 +2578,7 @@ int main(int argc, char **argv)
 
 Run: `uv sync`
 
-Expected: CMake configures, finds Qt6 + KF6Akonadi, compiles `lares-akonadi-notify`, installs into the package's `_bin/`. (If the runner doesn't have the dev headers, this fails with a `find_package(KF6Akonadi)` error — the dev should `pacman -S extra-cmake-modules` etc., per README.)
+Expected: CMake configures, finds Qt6 + KPim6Akonadi, compiles `lares-akonadi-notify`, installs into the package's `_bin/`. (If the runner doesn't have the dev headers, this fails with a `find_package(KPim6Akonadi)` error — the dev should `pacman -S extra-cmake-modules` etc., per README.)
 
 - [ ] **Step 4: Smoke-check the binary is in the wheel layout**
 
@@ -2625,7 +2620,7 @@ target_link_libraries(lares-akonadi-mutate
     PRIVATE
         Qt6::Core
         Qt6::DBus
-        KF6::AkonadiCore
+        KPim6::AkonadiCore
 )
 target_compile_features(lares-akonadi-mutate PRIVATE cxx_std_17)
 
@@ -2884,7 +2879,7 @@ int main(int argc, char **argv)
 
 - [ ] **Step 3: Add KMime dep — only on the mutate target**
 
-`KF6Akonadi` does not pull in KMime automatically; `mutate.cpp` uses `KMime::Message` and `KMime::Headers::Base`. Edit `src/akonadi_bridge/CMakeLists.txt`:
+`KPim6Akonadi` does not pull in KMime automatically; `mutate.cpp` uses `KMime::Message` and `KMime::Headers::Base`. Edit `src/akonadi_bridge/CMakeLists.txt`:
 
 1. Near the existing `find_package` lines, add:
    ```cmake
@@ -2896,11 +2891,11 @@ int main(int argc, char **argv)
        PRIVATE
            Qt6::Core
            Qt6::DBus
-           KF6::AkonadiCore
+           KPim6::AkonadiCore
            KPim6::Mime
    )
    ```
-   The notify target stays linked against `Qt6::Core Qt6::DBus KF6::AkonadiCore` only.
+   The notify target stays linked against `Qt6::Core Qt6::DBus KPim6::AkonadiCore` only.
 
 - [ ] **Step 4: Build**
 
