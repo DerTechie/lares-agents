@@ -64,9 +64,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Tests don't need return-type annotations; magic numbers are normal in assertions.
 "tests/**/*.py" = ["ANN", "PLR2004"]
 
 [tool.ruff.lint.flake8-type-checking]
+# Pydantic v2 models need annotations available at runtime, not just under TYPE_CHECKING.
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
@@ -74,6 +76,8 @@ include = ["src", "tests"]
 pythonVersion = "3.12"
 pythonPlatform = "Linux"
 typeCheckingMode = "strict"
+# Several KDE-adjacent libraries (dbus-next, akonadi bindings) ship partial stubs;
+# don't make missing stubs a hard fail.
 reportMissingTypeStubs = "warning"
 
 [tool.pytest.ini_options]
