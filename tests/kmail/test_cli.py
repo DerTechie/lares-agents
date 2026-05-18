@@ -274,7 +274,11 @@ def test_install_systemd_writes_unit_to_user_dir(tmp_path: Path) -> None:
     assert rc == 0
     unit = unit_dir / "lares-kmail.service"
     assert unit.exists()
-    assert "Description=Lares" in unit.read_text()
+    unit_text = unit.read_text()
+    assert "Description=Lares" in unit_text
+    # Bug A regression — first boot must not fail on a missing state dir.
+    assert "StateDirectory=lares" in unit_text
+    assert "ReadWritePaths=" not in unit_text
     # daemon-reload always
     assert any("daemon-reload" in str(c.args) for c in mock_run.call_args_list)
 

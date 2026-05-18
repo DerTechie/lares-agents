@@ -10,7 +10,7 @@ Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10
 ProtectSystem=strict
-ReadWritePaths=%h/.local/state/lares
+StateDirectory=lares
 NoNewPrivileges=true
 
 [Install]
