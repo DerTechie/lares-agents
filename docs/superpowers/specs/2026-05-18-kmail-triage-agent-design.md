@@ -301,9 +301,9 @@ The two concurrent tasks (`consume_new_mail` and `drain_retry_queue`) share the 
 
 **Serial classification** — single in-flight Ollama call. Local model on same host; parallelism just thrashes the GPU. Mail rate is low. If profiling later shows a bottleneck, a fixed-size `asyncio.Semaphore` is a trivial drop-in.
 
-### Startup catchup
+### Startup catchup — deferred to v0.2
 
-On every service start, before the main loop, scan inbox-like collections via `mutate` for items whose `item_id > MAX(items.item_id)` in sqlite and don't yet have a `lares-*` tag. Process them through the state machine. Bounded by a per-startup limit (config: `catchup_limit`, default 200) to avoid surprising the user with a large LLM marathon after long downtime. The manual `lares kmail catchup` / `lares kmail backfill` CLIs cover the long tail.
+Originally specified as a startup scan of items with `item_id > MAX(items.item_id)`. Requires a `list_items` op on the mutate helper that is not part of v0.1. v0.1 starts with an empty event horizon; any mail that arrived while the service was down is **not** automatically processed on next start. Users can re-process individual items via `lares kmail retag <id>` until v0.2 lands.
 
 ## 7. Configuration
 
@@ -434,8 +434,8 @@ Date: <Date header>
 | Command | Purpose |
 |---|---|
 | `lares kmail run` | Foreground service entry point. systemd invokes this. |
-| `lares kmail backfill [--limit N] [--collection NAME] [--dry-run]` | Opt-in batch pass over existing untagged inbox items. `--limit` default 100. `--dry-run` prints verdicts without applying tags. |
-| `lares kmail catchup [--since ITEM_ID]` | Scan inbox(es) for items whose `item_id` exceeds the last seen sqlite row and classify any without a `lares-*` tag. Also runs automatically on service startup, bounded by `catchup_limit`. |
+| `lares kmail backfill [--limit N] [--collection NAME] [--dry-run]` | **v0.2 (stubbed in v0.1).** Requires a `list_items` op on `lares-akonadi-mutate` which is not part of v0.1 scope. v0.1 ships the CLI surface that prints an actionable "not yet implemented" message. |
+| `lares kmail catchup [--since ITEM_ID]` | **v0.2 (stubbed in v0.1).** Same dependency as `backfill`. v0.1 ships the CLI surface only. Startup catchup behavior (described in §6) is also deferred to v0.2 — v0.1 starts with an empty event horizon and processes only items that arrive after service start. |
 | `lares kmail retag <item-id> [--remove]` | Force re-classification or strip all `lares-*` tags from one item. |
 | `lares kmail status [--json]` | Service state, queue depth, recent failures, last classified item. |
 | `lares kmail config-check` | Validates `config.toml`, checks Ollama reachability, verifies configured model is pulled, checks Akonadi up. Exits non-zero on any failure. |
@@ -545,6 +545,7 @@ Four `.eml` files, mix of German and English, faked synthetic-domain sender addr
 3. **Body truncation may chop signal-rich content.** First 8 KB is decisive for newsletters/notifications; risky for long personal mail. Acceptable risk; configurable per `[kmail].body_truncate_bytes`.
 4. **`Akonadi::Monitor` may miss events under server restart in narrow windows.** Mitigation: startup catchup scan + manual `lares kmail catchup`.
 5. **Tag definitions are global per Akonadi instance.** Synced-Akonadi setups across machines re-classify on the second machine (tag state is per-item). Edge case; documented limitation.
+6. **No bulk-discovery op on `lares-akonadi-mutate` in v0.1.** The helper exposes `fetch` and `set_tags` only; there is no `list_items` op. Consequences: no automatic startup catchup, no functional `backfill` or `catchup` CLI in v0.1. Mitigation: shipped as a v0.2 task — add `list_items` op (a few lines, wraps `Akonadi::ItemFetchJob` over a `Collection`) and unblock all three. Acceptable v0.1 gap because the new-mail path is unaffected; users can re-process individual stragglers via `lares kmail retag <id>`.
 
 ## 14. Documentation deliverables (part of v0.1)
 
@@ -572,3 +573,4 @@ Four `.eml` files, mix of German and English, faked synthetic-domain sender addr
 | Backoff | 10s → 30s → 60s → 5min, 10 attempts → `lares-error` | Quick recovery on transient outage; bounded on persistent. |
 | Install ownership | Agent owns full install lifecycle (systemd unit, config, preflight) | No shortcuts to dotfiles; per-app artifacts belong with the app. |
 | `lares.core` extraction | Deferred until KRunner exists | "Two implementations before abstraction" — CLAUDE.md root §2. |
+| Bulk-discovery op | Deferred to v0.2 | Surfaced during plan-writing; v0.1 ships the CLI surface stubbed with an actionable message. New-mail path is unaffected. |
