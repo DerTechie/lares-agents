@@ -1,0 +1,17 @@
+[Unit]
+Description=Lares — KMail/Akonadi mail triage agent
+After=akonadi.service
+PartOf=plasma-workspace.target
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/lares kmail run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/lares
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

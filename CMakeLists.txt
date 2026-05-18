@@ -12,3 +12,7 @@ set(CMAKE_AUTOMOC ON)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/akonadi_bridge/CMakeLists.txt")
     add_subdirectory(src/akonadi_bridge)
 endif()
+
+# Copy the systemd unit into the wheel so importlib.resources can find it.
+install(FILES packaging/systemd/lares-kmail.service
+        DESTINATION lares/_systemd)
