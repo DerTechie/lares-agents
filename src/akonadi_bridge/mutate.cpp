@@ -32,8 +32,12 @@
 
 #include <KMime/Message>
 
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <memory>
+#include <unistd.h>
 
 namespace
 {
@@ -41,6 +45,7 @@ namespace
 constexpr const char *LARES_PREFIX = "lares-";
 
 int g_maxBodyBytes = 8192;
+QByteArray g_inbuf; // line accumulator across notifier fires
 
 void writeResponse(const QJsonObject &obj)
 {
@@ -274,6 +279,15 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("lares-akonadi-mutate"));
+    // Qt6 auto-quits a QCoreApplication once the internal "quit lock" refcount
+    // drops to zero (no live KJobs, sockets, processes, etc.). Akonadi's async
+    // jobs raise that count for the duration of one D-Bus round-trip and drop
+    // it when the result handler returns — which races with our long-lived
+    // stdin reader and would terminate the helper after the first op. We
+    // explicitly drive shutdown ourselves on stdin EOF, so disable the
+    // automatic quit. See QCoreApplication::setQuitLockEnabled docs and the
+    // QEventLoopLocker / quitAutomatically mechanism in Qt 6.
+    QCoreApplication::setQuitLockEnabled(false);
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -287,17 +301,46 @@ int main(int argc, char **argv)
         g_maxBodyBytes = 8192;
     }
 
-    // Read stdin line-by-line on the event loop using QSocketNotifier on FD 0.
-    auto *notifier = new QSocketNotifier(fileno(stdin), QSocketNotifier::Read, &app);
-    QObject::connect(notifier, &QSocketNotifier::activated, [notifier](QSocketDescriptor) {
-        std::string line;
-        if (!std::getline(std::cin, line)) {
-            notifier->setEnabled(false);
-            QCoreApplication::quit();
-            return;
-        }
-        dispatch(QByteArray::fromStdString(line));
-    });
+    // Read stdin via non-blocking ::read() on STDIN_FILENO; accumulate into
+    // g_inbuf and dispatch each whole line. Quitting only on a real EOF
+    // (::read returns 0) — never on a spurious notifier fire — fixes the
+    // historical bug where buffered std::cin + QSocketNotifier interactions
+    // exited the helper after one async op.
+    const int stdinFlags = fcntl(STDIN_FILENO, F_GETFL);
+    if (stdinFlags < 0 || fcntl(STDIN_FILENO, F_SETFL, stdinFlags | O_NONBLOCK) < 0) {
+        std::cerr << "lares-akonadi-mutate: cannot set stdin non-blocking: "
+                  << std::strerror(errno) << '\n';
+        return 1;
+    }
+
+    auto *notifier = new QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read, &app);
+    QObject::connect(notifier, &QSocketNotifier::activated,
+        [notifier](QSocketDescriptor) {
+            for (;;) {
+                char chunk[4096];
+                const ssize_t n = ::read(STDIN_FILENO, chunk, sizeof(chunk));
+                if (n > 0) {
+                    g_inbuf.append(chunk, static_cast<int>(n));
+                    for (int nl; (nl = g_inbuf.indexOf('\n')) >= 0; ) {
+                        dispatch(g_inbuf.left(nl));
+                        g_inbuf.remove(0, nl + 1);
+                    }
+                    continue;
+                }
+                if (n == 0) {
+                    notifier->setEnabled(false);
+                    QCoreApplication::quit();
+                    return;
+                }
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+                std::cerr << "lares-akonadi-mutate: read(stdin) failed: "
+                          << std::strerror(errno) << '\n';
+                notifier->setEnabled(false);
+                QCoreApplication::exit(1);
+                return;
+            }
+        });
 
     return app.exec();
 }
