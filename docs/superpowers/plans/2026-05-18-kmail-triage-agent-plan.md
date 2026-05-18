@@ -2714,7 +2714,7 @@ QString headerOrEmpty(const KMime::Headers::Base *hdr)
     return hdr ? QString::fromUtf8(hdr->asUnicodeString().toUtf8()) : QString();
 }
 
-QString extractBody(const KMime::Message::Ptr &msg)
+QString extractBody(const std::shared_ptr<KMime::Message> &msg)
 {
     auto *plain = msg->mainBodyPart("text/plain");
     if (plain) {
@@ -2751,8 +2751,8 @@ void handleFetch(const QString &id, qint64 itemId)
         resp.insert("item_id", itemId);
 
         QJsonObject headers;
-        if (fetched.hasPayload<KMime::Message::Ptr>()) {
-            auto msg = fetched.payload<KMime::Message::Ptr>();
+        if (fetched.hasPayload<std::shared_ptr<KMime::Message>>()) {
+            auto msg = fetched.payload<std::shared_ptr<KMime::Message>>();
             headers.insert("From", headerOrEmpty(msg->from()));
             headers.insert("To", headerOrEmpty(msg->to()));
             headers.insert("Subject", headerOrEmpty(msg->subject()));
