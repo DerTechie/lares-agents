@@ -23,8 +23,7 @@ Other surfaces (calendar, file triage, voice, additional mail backends, web UIs)
 ## Stack
 
 - Python 3.12+, managed with [`uv`](https://github.com/astral-sh/uv).
-- Long-running agents as `systemd --user` services. On-demand agents as short-lived scripts invoked by a host shim.
-- D-Bus for KMail (Akonadi) and KRunner integration.
+- Both agents run as `systemd --user` services. KMail triage watches Akonadi over D-Bus; KRunner integration is a D-Bus daemon implementing `org.kde.krunner1`.
 - LLM backend: Ollama at `http://127.0.0.1:11434`. Bring your own model.
 
 ## Hard rules

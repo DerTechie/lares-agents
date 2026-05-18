@@ -8,8 +8,8 @@
 
 The single public Python project that implements the Lares agents. Internal module layout (planned — modules land as features arrive, not before):
 
-- `lares.kmail` — Akonadi triage agent (`systemd --user` service).
-- `lares.krunner` — KRunner LLM action (short-lived script invoked by a KRunner plugin shim).
+- `lares.kmail` — Akonadi triage agent (`systemd --user` service, D-Bus to Akonadi).
+- `lares.krunner` — KRunner LLM action, shipped as a long-running `systemd --user` D-Bus daemon speaking `org.kde.krunner1`. KRunner discovers it via a `.service` + `.desktop` pair; there is no separate compiled plugin. Python cannot host a first-class KRunner `KPlugin` — this is a known tradeoff.
 - `lares.core` — shared Ollama client, config loader, logging.
 - `lares.cli` — `lares` CLI for inspection, agent control, debugging.
 
