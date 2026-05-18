@@ -2942,6 +2942,28 @@ git add src/akonadi_bridge/CMakeLists.txt src/akonadi_bridge/mutate.cpp
 git commit -m "feat(bridge): add lares-akonadi-mutate C++ helper for fetch and tag-set"
 ```
 
+- [ ] **Step 7: Spec-conformance fix-up (one follow-up commit)**
+
+The Step 2 draft is deliberately minimal so the structural commit reads cleanly. Two spec §5 requirements are NOT met by the Step 2 draft and must be closed in a `fix(bridge):` follow-up commit on top of Step 6:
+
+1. **`akonadi_offline` error code path.** Spec §5 lists `akonadi_offline` as a distinct code; the Step 2 draft never emits it. Add a small `ensureAkonadiOnline(id)` helper that emits `akonadi_offline` when `Akonadi::ServerManager::state() != Running`, and call it at the top of `handleFetch` and `handleSetTags`. Add `#include <Akonadi/ServerManager>`.
+2. **`TagCreateJob` auto-vivification.** Spec §5: "auto-creating tag definitions via `TagCreateJob` if missing." The Step 2 draft constructs `Akonadi::Tag(name)` directly; the gid attaches to the item but no server-side Tag definition (with name, color, type) is created. Replace the direct-construct loop with a `TagCreateJob` chain: for each requested name, issue an `Akonadi::TagCreateJob(candidate)` with `setMergeIfExisting(true)`. Coordinate the N completions with a shared counter; on counter-reaches-zero, invoke an extracted `applyTagsAndModify(...)` helper that does the `ItemModifyJob`.
+
+Bundle the following nits into the same commit so the contract surface is clean:
+
+- **UTF-8 codepoint-safe body truncation.** `QByteArray::left(n)` can split a multibyte sequence. Walk back from the truncation point while bytes match the `10xxxxxx` continuation pattern; then drop a trailing head byte if it's now orphaned (`110xxxxx`/`1110xxxx`/`11110xxx`).
+- **Simplify `headerOrEmpty`.** `QString::fromUtf8(hdr->asUnicodeString().toUtf8())` is a no-op roundtrip; replace with `return hdr ? hdr->asUnicodeString() : QString();`.
+- **`QJsonValue::toInteger()`** for `item_id` parsing in `dispatch()`. `toDouble()` + `static_cast<qint64>` loses precision above 2^53.
+- **Remove unused includes** — after the TagCreateJob change lands, `<Akonadi/TagFetchJob>` and `<Akonadi/TagFetchScope>` are not used; keep only `<Akonadi/TagCreateJob>`.
+
+Verification + commit message shape:
+```bash
+uv build --wheel --out-dir /tmp/lares-wheel-fixup
+uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest -m "not integration"
+git add src/akonadi_bridge/mutate.cpp
+git commit -m "fix(bridge): conform lares-akonadi-mutate to spec §5"
+```
+
 ---
 
 ## Task 14 — CLI scaffolding + `lares kmail run`

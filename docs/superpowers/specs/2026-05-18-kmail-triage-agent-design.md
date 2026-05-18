@@ -217,12 +217,16 @@ Runs `ruff check`, `ruff format --check`, `pyright`, `pytest -m "not integration
   ```
   Semantics: replaces all `lares-*` tags on this item with the given list (auto-creating tag definitions via `TagCreateJob` if missing). **Non-`lares-*` tags the user added manually are preserved.**
 
-- **Errors:** `{"id":"…","ok":false,"error":"…","code":"…"}`. Codes: `not_found`, `akonadi_offline`, `bad_request`, `internal`.
+- **Errors:** `{"id":"…","ok":false,"error":"…","code":"…"}`. Codes:
+  - `not_found` — item id does not resolve, or item-fetch returned an empty result set.
+  - `akonadi_offline` — `Akonadi::ServerManager::state() != Running` at request time. The helper probes this before issuing each fetch or modify job.
+  - `bad_request` — request line is not valid JSON, is missing the `op` field, or names an unknown op.
+  - `internal` — Akonadi job failed for any reason other than the above (e.g. `ItemModifyJob` or `TagCreateJob` reported an error).
 - **Lifecycle:** long-running, one process for service lifetime. On crash, Python restarts and re-issues in-flight requests.
 
 ### Implementation notes
 
-- Both helpers use `Akonadi::Session` with default constructor.
+- Both helpers rely on `Akonadi::Session::defaultSession()` — they do not construct an explicit `Akonadi::Session`. Akonadi auto-creates the default session on the first job dispatch.
 - `mutate` uses `Akonadi::ItemModifyJob` with `disableRevisionCheck()` (we may not have an up-to-date item revision); `setTags()` accepts the post-merge list.
 - Body extraction in `fetch`: `Akonadi::ItemFetchJob` with `FetchScope().fetchFullPayload(true)`, then walk the MIME tree for the first `text/plain` part, decode quoted-printable / base64 / charset, truncate to `--max-body-bytes`.
 - **HTML-only emails** (common for newsletters / marketing mail): if no `text/plain` part exists, walk for the first `text/html` part and run a minimal `QTextDocumentFragment::fromHtml(...).toPlainText()` pass to strip markup. The result is returned in the same `body_text` field — the LLM does not need to know the source. No separate field; truncation still applies to the post-strip text.
