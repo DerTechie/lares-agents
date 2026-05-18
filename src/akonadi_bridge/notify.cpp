@@ -13,12 +13,12 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QTextStream>
 #include <iostream>
 
 #include <Akonadi/Collection>
 #include <Akonadi/Item>
 #include <Akonadi/Monitor>
+#include <Akonadi/ServerManager>
 #include <Akonadi/SpecialCollectionAttribute>
 
 namespace
@@ -32,7 +32,7 @@ void emitEvent(const Akonadi::Item &item, const Akonadi::Collection &collection)
     obj.insert("collection_id", static_cast<qint64>(collection.id()));
     obj.insert("remote_id", item.remoteId());
     obj.insert("mimetype", item.mimeType());
-    obj.insert("ts", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    obj.insert("ts", QDateTime::currentDateTimeUtc().toString(Qt::ISODate) + QLatin1Char('Z'));
 
     const auto bytes = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     std::cout << bytes.constData() << '\n';
@@ -62,17 +62,26 @@ int main(int argc, char **argv)
     parser.addOption(extraOpt);
     parser.process(app);
 
-    auto *monitor = new Akonadi::Monitor(&app);
-    monitor->setMimeTypeMonitored(parser.value(mimeOpt));
+    Akonadi::Monitor monitor(&app);
+    monitor.setMimeTypeMonitored(parser.value(mimeOpt));
+
+    QObject::connect(Akonadi::ServerManager::self(),
+        &Akonadi::ServerManager::stateChanged,
+        &monitor, [&monitor, mime = parser.value(mimeOpt)](Akonadi::ServerManager::State state) {
+            if (state == Akonadi::ServerManager::Running) {
+                monitor.setMimeTypeMonitored(mime);
+            }
+        });
+
     // Akonadi::Monitor by itself fires for every monitored mimetype across
     // every collection the session can see. Filtering to inbox-like
     // collections happens inside the slot: cheap and avoids depending on
     // SpecialCollectionAttribute being set at startup (it's lazy on first
     // resource sync).
-    const QString inboxAttrType = parser.value(attrOpt).toLower();
+    const QByteArray inboxAttrType = parser.value(attrOpt).toLower().toUtf8();
     const QStringList extraNames = parser.values(extraOpt);
 
-    QObject::connect(monitor, &Akonadi::Monitor::itemAdded,
+    QObject::connect(&monitor, &Akonadi::Monitor::itemAdded,
         [inboxAttrType, extraNames](const Akonadi::Item &item,
                                     const Akonadi::Collection &collection) {
             bool include = false;
@@ -81,7 +90,7 @@ int main(int argc, char **argv)
             } else if (collection.hasAttribute<Akonadi::SpecialCollectionAttribute>()) {
                 const auto *attr =
                     collection.attribute<Akonadi::SpecialCollectionAttribute>();
-                if (attr && attr->collectionType().toLower() == inboxAttrType.toUtf8()) {
+                if (attr && attr->collectionType().toLower() == inboxAttrType) {
                     include = true;
                 }
             }
