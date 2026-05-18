@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+from importlib import resources
 from pathlib import Path
 from typing import NoReturn
 
@@ -141,6 +142,18 @@ def _cmd_kmail_purge(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_install_config(ns: argparse.Namespace) -> int:
+    target = Path(ns.config)
+    if target.exists() and not ns.force:
+        sys.stderr.write(f"refusing to overwrite existing {target} (use --force)\n")
+        return 1
+    target.parent.mkdir(parents=True, exist_ok=True)
+    template = resources.files("lares._config").joinpath("config.toml.skel").read_text()
+    target.write_text(template)
+    sys.stdout.write(f"wrote {target}\n")
+    return 0
+
+
 async def _run_backfill(
     cfg: LaresConfig,
     *,
@@ -239,6 +252,15 @@ def build_parser() -> argparse.ArgumentParser:
     purge = kmail_sub.add_parser("purge", help="delete sqlite state (destructive)")
     purge.add_argument("--confirm", action="store_true", required=True)
     purge.set_defaults(func=_cmd_kmail_purge)
+
+    install = sub.add_parser("install", help="install lifecycle (config / systemd / check)")
+    install_sub = install.add_subparsers(dest="install_cmd", required=True)
+
+    install_cfg = install_sub.add_parser("config", help="write config.toml skeleton")
+    install_cfg.add_argument(
+        "--force", action="store_true", help="overwrite an existing config file"
+    )
+    install_cfg.set_defaults(func=_cmd_install_config)
 
     return parser
 

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from pytest_httpx import HTTPXMock
 
 from lares.kmail.cli import (
+    _cmd_install_config,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_config_check,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_purge,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_status,  # pyright: ignore[reportPrivateUsage]
@@ -187,6 +188,47 @@ notification = "x"
     rc = _cmd_kmail_purge(_NS())  # type: ignore[arg-type]
     assert rc == 0
     assert not db.exists()
+
+
+def test_install_config_writes_skeleton_when_missing(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+
+    class _NS:
+        config = target
+        force = False
+
+    rc = _cmd_install_config(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    assert target.exists()
+    body = target.read_text()
+    assert "[lares.ollama]" in body
+    assert "qwen3:4b-instruct-2507-q4_K_M" in body
+
+
+def test_install_config_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+    target.write_text("existing")
+
+    class _NS:
+        config = target
+        force = False
+
+    rc = _cmd_install_config(_NS())  # type: ignore[arg-type]
+    assert rc != 0
+    assert target.read_text() == "existing"
+
+
+def test_install_config_force_overwrites(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+    target.write_text("existing")
+
+    class _NS:
+        config = target
+        force = True
+
+    rc = _cmd_install_config(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    assert "qwen3" in target.read_text()
 
 
 def _cfg_toml(cfg: LaresConfig) -> str:

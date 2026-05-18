@@ -1,0 +1,34 @@
+# Lares configuration. Place at ~/.config/lares/config.toml.
+
+[lares]
+log_level = "INFO"                              # DEBUG only for development
+
+[lares.ollama]
+endpoint    = "http://127.0.0.1:11434"          # local-first hardcoded default
+model       = "qwen3:4b-instruct-2507-q4_K_M"
+# Upgrade if VRAM >= 12 GB:  "llama3.1:8b-instruct-q4_K_M" (~6 GB, more conservative)
+# Downgrade for CPU only:    "qwen3:1.7b-instruct-2507-q4_K_M" (~1 GB, slower)
+# AVOID: any *-thinking-*, any deepseek-r1:* -- they break JSON output.
+timeout_s   = 30
+temperature = 0.0
+
+[kmail]
+enabled              = true
+state_db_path        = "~/.local/state/lares/kmail.db"
+body_truncate_bytes  = 8192
+classify_timeout_s   = 30
+max_retries          = 10
+catchup_limit        = 200     # v0.2 -- currently a no-op in v0.1
+min_confidence       = 0.5     # below this -> lares-unclassified
+helper_binary_path   = ""      # dev override; "" = use packaged helpers
+
+# Tag taxonomy. Keys become Akonadi tag names (prefixed with "lares-" when
+# applied to items). Descriptions go to the LLM as part of the prompt.
+[kmail.tags]
+personal     = "Mail from a real human writing to me directly (friends, family, individual professional correspondence)."
+business     = "Inquiries, contracts, invoices, professional requests requiring a response."
+newsletter   = "Marketing emails, digests, promotions, mailing list announcements."
+notification = "Transactional or automated mail (GitHub notifications, calendar invites, receipts, service alerts)."
+
+[kmail.watch]
+extra_collection_names = []
