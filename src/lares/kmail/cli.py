@@ -192,6 +192,80 @@ def _cmd_install_systemd(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_install_check(ns: argparse.Namespace) -> int:  # noqa: PLR0912 — five sequential check blocks, splitting would obscure the preflight flow
+    skip = set(os.environ.get("LARES_CHECK_SKIP", "").split(","))
+    fails: list[str] = []
+    passes: list[str] = []
+
+    # 1. Helpers in package
+    if "helpers" not in skip:
+        for name in ("lares-akonadi-notify", "lares-akonadi-mutate"):
+            helper = Path(str(resources.files("lares") / "_bin" / name))
+            if helper.is_file() and os.access(helper, os.X_OK):
+                passes.append(f"helper {name}")
+            else:
+                fails.append(
+                    f"helper {name} missing or not executable at {helper}\n"
+                    "  Fix:  uv sync   (rebuild C++ helpers)"
+                )
+
+    # 2. Config exists & valid
+    cfg: LaresConfig | None = None
+    try:
+        cfg = _load(ns)
+        passes.append("config valid")
+    except FileNotFoundError:
+        fails.append(f"config not found at {ns.config}\n  Fix:  lares install config")
+    except Exception as exc:  # broad catch is correct: config validation is a system boundary
+        fails.append(f"config invalid: {exc}")
+
+    # 3. Ollama reachable + model pulled (only if config loaded)
+    if cfg is not None:
+        try:
+            with httpx.Client(base_url=cfg.lares.ollama.endpoint, timeout=5.0) as client:
+                r = client.get("/api/tags")
+                r.raise_for_status()
+                models = {m.get("name") for m in r.json().get("models", [])}
+                if cfg.lares.ollama.model in models:
+                    passes.append(f"ollama model {cfg.lares.ollama.model} pulled")
+                else:
+                    fails.append(
+                        f'ollama model "{cfg.lares.ollama.model}" not pulled\n'
+                        f"  Fix:  ollama pull {cfg.lares.ollama.model}"
+                    )
+        except httpx.HTTPError as exc:
+            fails.append(
+                f"ollama not reachable at {cfg.lares.ollama.endpoint}: {exc}\n"
+                "  Fix:  start the ollama service (systemctl --user start ollama)"
+            )
+
+    # 4. Akonadi reachable (best-effort dbus probe)
+    if "akonadi" not in skip:
+        r = subprocess.run(
+            ["qdbus6", "org.freedesktop.Akonadi"],
+            check=False,
+            capture_output=True,
+        )
+        if r.returncode == 0:
+            passes.append("akonadi reachable")
+        else:
+            fails.append("akonadi not reachable on D-Bus\n  Fix:  akonadictl start")
+
+    # 5. systemd unit installed
+    if "systemd" not in skip:
+        unit = _user_unit_dir() / "lares-kmail.service"
+        if unit.is_file():
+            passes.append(f"systemd unit at {unit}")
+        else:
+            fails.append("systemd unit not installed\n  Fix:  lares install systemd")
+
+    for p in passes:
+        sys.stdout.write(f"✓ {p}\n")
+    for f in fails:
+        sys.stdout.write(f"✗ {f}\n")
+    return 1 if fails else 0
+
+
 async def _run_backfill(
     cfg: LaresConfig,
     *,
@@ -312,6 +386,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop, disable, and remove the unit",
     )
     install_sd.set_defaults(func=_cmd_install_systemd)
+
+    install_check = install_sub.add_parser(
+        "check", help="composite preflight: helpers, config, ollama, akonadi, systemd"
+    )
+    install_check.set_defaults(func=_cmd_install_check)
 
     return parser
 

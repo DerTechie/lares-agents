@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pytest_httpx import HTTPXMock
 
 from lares.kmail.cli import (
+    _cmd_install_check,  # pyright: ignore[reportPrivateUsage]
     _cmd_install_config,  # pyright: ignore[reportPrivateUsage]
     _cmd_install_systemd,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_config_check,  # pyright: ignore[reportPrivateUsage]
@@ -313,3 +314,38 @@ def test_install_systemd_uninstall_removes_unit(tmp_path: Path) -> None:
         rc = _cmd_install_systemd(_NS())  # type: ignore[arg-type]
     assert rc == 0
     assert not (unit_dir / "lares-kmail.service").exists()
+
+
+def test_install_check_reports_all_pass(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg_file = tmp_path / "config.toml"
+    cfg_file.write_text(
+        """
+[lares.ollama]
+model = "m"
+
+[kmail.tags]
+personal = "x"
+business = "x"
+newsletter = "x"
+notification = "x"
+"""
+    )
+    httpx_mock.add_response(
+        url="http://127.0.0.1:11434/api/tags",
+        json={"models": [{"name": "m"}]},
+    )
+    # Skip the helper-presence and akonadi-up checks via env override.
+    with patch.dict(os.environ, {"LARES_CHECK_SKIP": "helpers,akonadi,systemd"}):
+
+        class _NS:
+            config = cfg_file
+
+        rc = _cmd_install_check(_NS())  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "✓ ollama" in out.lower()
+    assert "✓ config" in out.lower()
