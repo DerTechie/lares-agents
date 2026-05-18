@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
@@ -154,6 +155,43 @@ def _cmd_install_config(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _user_unit_dir() -> Path:
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def _systemctl(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["systemctl", "--user", *args],
+        check=False,
+        capture_output=True,
+    )
+
+
+def _cmd_install_systemd(ns: argparse.Namespace) -> int:
+    unit_dir = _user_unit_dir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_path = unit_dir / "lares-kmail.service"
+
+    if ns.uninstall:
+        if unit_path.exists():
+            _systemctl("stop", "lares-kmail.service")
+            _systemctl("disable", "lares-kmail.service")
+            unit_path.unlink()
+        _systemctl("daemon-reload")
+        sys.stdout.write(f"removed {unit_path}\n")
+        return 0
+
+    template = resources.files("lares._systemd").joinpath("lares-kmail.service").read_text()
+    unit_path.write_text(template)
+    sys.stdout.write(f"wrote {unit_path}\n")
+    _systemctl("daemon-reload")
+    if ns.enable:
+        _systemctl("enable", "lares-kmail.service")
+    if ns.start:
+        _systemctl("start", "lares-kmail.service")
+    return 0
+
+
 async def _run_backfill(
     cfg: LaresConfig,
     *,
@@ -261,6 +299,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="overwrite an existing config file"
     )
     install_cfg.set_defaults(func=_cmd_install_config)
+
+    install_sd = install_sub.add_parser(
+        "systemd",
+        help="install / enable / start the systemd --user unit",
+    )
+    install_sd.add_argument("--enable", action="store_true")
+    install_sd.add_argument("--start", action="store_true")
+    install_sd.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="stop, disable, and remove the unit",
+    )
+    install_sd.set_defaults(func=_cmd_install_systemd)
 
     return parser
 

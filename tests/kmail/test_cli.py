@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json as _json
+import os
+import subprocess
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 
@@ -13,6 +16,7 @@ if TYPE_CHECKING:
 
 from lares.kmail.cli import (
     _cmd_install_config,  # pyright: ignore[reportPrivateUsage]
+    _cmd_install_systemd,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_config_check,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_purge,  # pyright: ignore[reportPrivateUsage]
     _cmd_kmail_status,  # pyright: ignore[reportPrivateUsage]
@@ -247,3 +251,65 @@ business = "x"
 newsletter = "x"
 notification = "x"
 """
+
+
+def _systemd_unit_dir(home: Path) -> Path:
+    return home / ".config" / "systemd" / "user"
+
+
+def test_install_systemd_writes_unit_to_user_dir(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    unit_dir = _systemd_unit_dir(home)
+
+    class _NS:
+        config = tmp_path / "config.toml"
+        enable = False
+        start = False
+        uninstall = False
+
+    with patch.dict(os.environ, {"HOME": str(home)}), patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+        rc = _cmd_install_systemd(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    unit = unit_dir / "lares-kmail.service"
+    assert unit.exists()
+    assert "Description=Lares" in unit.read_text()
+    # daemon-reload always
+    assert any("daemon-reload" in str(c.args) for c in mock_run.call_args_list)
+
+
+def test_install_systemd_with_enable_and_start(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+
+    class _NS:
+        config = tmp_path / "config.toml"
+        enable = True
+        start = True
+        uninstall = False
+
+    with patch.dict(os.environ, {"HOME": str(home)}), patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+        rc = _cmd_install_systemd(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    calls = [str(c.args[0]) for c in mock_run.call_args_list]
+    assert any("enable" in s for s in calls)
+    assert any("start" in s for s in calls)
+
+
+def test_install_systemd_uninstall_removes_unit(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    unit_dir = _systemd_unit_dir(home)
+    unit_dir.mkdir(parents=True)
+    (unit_dir / "lares-kmail.service").write_text("stub")
+
+    class _NS:
+        config = tmp_path / "config.toml"
+        enable = False
+        start = False
+        uninstall = True
+
+    with patch.dict(os.environ, {"HOME": str(home)}), patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+        rc = _cmd_install_systemd(_NS())  # type: ignore[arg-type]
+    assert rc == 0
+    assert not (unit_dir / "lares-kmail.service").exists()
