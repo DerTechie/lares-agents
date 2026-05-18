@@ -1,6 +1,6 @@
 # `lares.kmail` v0.1 — bug-fix pass — design spec
 
-**Status:** approved for implementation
+**Status:** implemented (`ecf4f3f`, `0f60e6d`); see "Implementation amendment" at the end of §4 for the Qt6 finding
 **Date:** 2026-05-18
 **Author:** Mike Esser
 **Repo:** `DerTechie/lares-agents`
@@ -156,6 +156,20 @@ QObject::connect(notifier, &QSocketNotifier::activated,
 ```
 
 New includes: `<unistd.h>` (`::read`, `STDIN_FILENO`), `<fcntl.h>` (`fcntl`, `O_NONBLOCK`), `<cerrno>` (`errno`), `<cstring>` (`std::strerror`).
+
+### Implementation amendment (post-`ecf4f3f`)
+
+The fix above is **necessary but not sufficient** on Qt 6.7+. With only the stdin-reader rewrite applied, the regression test still fails — the helper still exits after one async op. The deeper cause is `QCoreApplication::quitAutomatically()`: `Akonadi::ItemFetchJob` derives from `KJob`, which holds a `QEventLoopLocker` for the lifetime of the job. When the last locker is released (on `ItemFetchJob::result`), Qt 6 posts a `QEvent::Quit` and the event loop exits — independent of stdin state. This is a Qt 5 → Qt 6 semantic change.
+
+The actual fix landed in `ecf4f3f` adds one line immediately after constructing `QCoreApplication`:
+
+```cpp
+QCoreApplication::setQuitLockEnabled(false);
+```
+
+This disables the quit-lock mechanism for the entire process. The helper's only exit paths become: `fcntl` bail-out (line 309), explicit `QCoreApplication::quit()` on stdin EOF (line 332), explicit `QCoreApplication::exit(1)` on unexpected `errno` from `::read` (line 340), and OS signals (default Qt handling). None of these paths rely on auto-quit, so disabling it is risk-free for this binary.
+
+`lares-akonadi-notify` does not currently issue `KJob`s on its own (it only relays `Akonadi::Monitor` signals), but a future addition that constructed one would exhibit the same footgun. Track as a follow-up audit. **The same `setQuitLockEnabled(false)` pattern is the correct prophylaxis for any future Qt6-based CLI helper that drives KJobs.**
 
 ### Behavioral contract preserved
 

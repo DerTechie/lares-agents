@@ -198,7 +198,9 @@ Find this exact block at the end of `main()` (around lines 290-301), immediately
     return app.exec();
 ```
 
-Replace with:
+Replace with the block below.
+
+**Important amendment (added after the implementation discovered this empirically):** also add `QCoreApplication::setQuitLockEnabled(false);` immediately after the `QCoreApplication app(argc, argv);` line near the top of `main()`. Without it the regression test still fails — Qt 6.7+'s auto-quit posts `QEvent::Quit` when the last `KJob`'s `QEventLoopLocker` releases (on `ItemFetchJob::result`), independent of stdin state. See §4 "Implementation amendment" of the spec for the full explanation. The historical reader-only patch below is necessary but not sufficient.
 
 ```cpp
     // Read stdin via non-blocking ::read() on STDIN_FILENO; accumulate into
