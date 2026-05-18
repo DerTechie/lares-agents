@@ -26,10 +26,9 @@
 #include <Akonadi/ItemFetchJob>
 #include <Akonadi/ItemFetchScope>
 #include <Akonadi/ItemModifyJob>
+#include <Akonadi/ServerManager>
 #include <Akonadi/Tag>
 #include <Akonadi/TagCreateJob>
-#include <Akonadi/TagFetchJob>
-#include <Akonadi/TagFetchScope>
 
 #include <KMime/Message>
 
@@ -62,7 +61,17 @@ void writeError(const QString &id, const QString &message, const QString &code)
 
 QString headerOrEmpty(const KMime::Headers::Base *hdr)
 {
-    return hdr ? QString::fromUtf8(hdr->asUnicodeString().toUtf8()) : QString();
+    return hdr ? hdr->asUnicodeString() : QString();
+}
+
+bool ensureAkonadiOnline(const QString &id)
+{
+    if (Akonadi::ServerManager::state() != Akonadi::ServerManager::Running) {
+        writeError(id, QStringLiteral("Akonadi server is not running"),
+                   QStringLiteral("akonadi_offline"));
+        return false;
+    }
+    return true;
 }
 
 QString extractBody(const std::shared_ptr<KMime::Message> &msg)
@@ -81,6 +90,9 @@ QString extractBody(const std::shared_ptr<KMime::Message> &msg)
 
 void handleFetch(const QString &id, qint64 itemId)
 {
+    if (!ensureAkonadiOnline(id)) {
+        return;
+    }
     Akonadi::Item item(itemId);
     auto *job = new Akonadi::ItemFetchJob(item);
     job->fetchScope().fetchFullPayload(true);
@@ -114,7 +126,18 @@ void handleFetch(const QString &id, qint64 itemId)
             QString body = extractBody(msg);
             const QByteArray utf8 = body.toUtf8();
             if (utf8.size() > g_maxBodyBytes) {
-                body = QString::fromUtf8(utf8.left(g_maxBodyBytes));
+                QByteArray trimmed = utf8.left(g_maxBodyBytes);
+                while (!trimmed.isEmpty()
+                       && (static_cast<unsigned char>(trimmed.back()) & 0xC0) == 0x80) {
+                    trimmed.chop(1);
+                }
+                if (!trimmed.isEmpty()) {
+                    const auto last = static_cast<unsigned char>(trimmed.back());
+                    if ((last & 0xE0) == 0xC0 || (last & 0xF0) == 0xE0 || (last & 0xF8) == 0xF0) {
+                        trimmed.chop(1);
+                    }
+                }
+                body = QString::fromUtf8(trimmed);
             }
             resp.insert("body_text", body);
         } else {
@@ -132,8 +155,37 @@ void handleFetch(const QString &id, qint64 itemId)
     });
 }
 
+void applyTagsAndModify(const QString &id, qint64 itemId, Akonadi::Item fetched,
+                        const Akonadi::Tag::List &finalTags,
+                        const QStringList &requestedTagNames)
+{
+    fetched.setTags(finalTags);
+    auto *modJob = new Akonadi::ItemModifyJob(fetched);
+    modJob->disableRevisionCheck();
+    QObject::connect(modJob, &KJob::result,
+        [id, itemId, requestedTagNames](KJob *mkjob) {
+        if (mkjob->error()) {
+            writeError(id, mkjob->errorString(), QStringLiteral("internal"));
+            return;
+        }
+        QJsonObject resp;
+        resp.insert("id", id);
+        resp.insert("ok", true);
+        resp.insert("item_id", itemId);
+        QJsonArray arr;
+        for (const auto &n : requestedTagNames) {
+            arr.append(n);
+        }
+        resp.insert("tags", arr);
+        writeResponse(resp);
+    });
+}
+
 void handleSetTags(const QString &id, qint64 itemId, const QStringList &requestedTagNames)
 {
+    if (!ensureAkonadiOnline(id)) {
+        return;
+    }
     // First fetch the current item to learn its existing tags so we can
     // preserve non-lares ones, then replace the lares-* subset.
     Akonadi::Item item(itemId);
@@ -148,38 +200,45 @@ void handleSetTags(const QString &id, qint64 itemId, const QStringList &requeste
             return;
         }
         Akonadi::Item fetched = fjob->items().constFirst();
-        Akonadi::Tag::List newTags;
+        Akonadi::Tag::List preserved;
         for (const auto &tag : fetched.tags()) {
             const QByteArray gid = tag.gid();
             if (!gid.startsWith(LARES_PREFIX)) {
-                newTags.append(tag);
+                preserved.append(tag);
             }
         }
+
+        if (requestedTagNames.isEmpty()) {
+            applyTagsAndModify(id, itemId, fetched, preserved, requestedTagNames);
+            return;
+        }
+
+        auto counter = std::make_shared<int>(requestedTagNames.size());
+        auto accumulated = std::make_shared<Akonadi::Tag::List>(preserved);
         for (const auto &name : requestedTagNames) {
-            Akonadi::Tag t(name);
-            t.setGid(name.toUtf8());
-            newTags.append(t);
+            Akonadi::Tag candidate;
+            candidate.setName(name);
+            candidate.setGid(name.toUtf8());
+            auto *tcj = new Akonadi::TagCreateJob(candidate);
+            tcj->setMergeIfExisting(true);
+            QObject::connect(tcj, &KJob::result,
+                [id, itemId, fetched, accumulated, counter, requestedTagNames](KJob *kj) mutable {
+                auto *createJob = static_cast<Akonadi::TagCreateJob *>(kj);
+                if (*counter < 0) {
+                    return;
+                }
+                if (createJob->error()) {
+                    writeError(id, createJob->errorString(), QStringLiteral("internal"));
+                    *counter = -1;
+                    return;
+                }
+                accumulated->append(createJob->tag());
+                --*counter;
+                if (*counter == 0) {
+                    applyTagsAndModify(id, itemId, fetched, *accumulated, requestedTagNames);
+                }
+            });
         }
-        fetched.setTags(newTags);
-        auto *modJob = new Akonadi::ItemModifyJob(fetched);
-        modJob->disableRevisionCheck();
-        QObject::connect(modJob, &KJob::result,
-            [id, itemId, requestedTagNames](KJob *mkjob) {
-            if (mkjob->error()) {
-                writeError(id, mkjob->errorString(), QStringLiteral("internal"));
-                return;
-            }
-            QJsonObject resp;
-            resp.insert("id", id);
-            resp.insert("ok", true);
-            resp.insert("item_id", itemId);
-            QJsonArray arr;
-            for (const auto &n : requestedTagNames) {
-                arr.append(n);
-            }
-            resp.insert("tags", arr);
-            writeResponse(resp);
-        });
     });
 }
 
@@ -195,7 +254,7 @@ void dispatch(const QByteArray &line)
     const auto obj = doc.object();
     const QString id = obj.value(QStringLiteral("id")).toString();
     const QString op = obj.value(QStringLiteral("op")).toString();
-    const qint64 itemId = static_cast<qint64>(obj.value(QStringLiteral("item_id")).toDouble());
+    const qint64 itemId = obj.value(QStringLiteral("item_id")).toInteger();
     if (op == QStringLiteral("fetch")) {
         handleFetch(id, itemId);
     } else if (op == QStringLiteral("set_tags")) {
