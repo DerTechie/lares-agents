@@ -12,28 +12,39 @@ classifiers = [
     "Development Status :: 1 - Planning",
     "Environment :: X11 Applications :: KDE",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3 :: Only",
 ]
-dependencies = []
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+]
+
+[project.scripts]
+lares = "lares.kmail.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/DerTechie/lares-agents"
 Issues = "https://github.com/DerTechie/lares-agents/issues"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/lares"]
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.20"
+ninja.make-fallback = true
+wheel.packages = ["src/lares"]
+build-dir = "build/{wheel_tag}"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "pytest-httpx>=0.32",
+    "freezegun>=1.5",
     "ruff>=0.7",
     "pyright>=1.1.385",
 ]
@@ -45,34 +56,17 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "UP",   # pyupgrade — use modern syntax
-    "B",    # flake8-bugbear — likely bugs
-    "SIM",  # flake8-simplify
-    "C4",   # flake8-comprehensions
-    "PIE",  # flake8-pie — misc anti-patterns
-    "RET",  # flake8-return — return discipline
-    "T20",  # flake8-print — no print() in shipped code
-    "PT",   # flake8-pytest-style
-    "TCH",  # flake8-type-checking — TYPE_CHECKING imports
-    "ANN",  # flake8-annotations — enforce type hints
-    "N",    # pep8-naming
-    "RUF",  # ruff-specific
-    "PL",   # pylint (subset)
+    "E", "W", "F", "I", "UP", "B", "SIM", "C4", "PIE", "RET",
+    "T20", "PT", "TCH", "ANN", "N", "RUF", "PL",
 ]
 ignore = [
     "PLR0913",  # too many arguments — judgement call, not a rule
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests don't need return-type annotations; magic numbers are normal in assertions.
 "tests/**/*.py" = ["ANN", "PLR2004"]
 
 [tool.ruff.lint.flake8-type-checking]
-# Pydantic v2 models need annotations available at runtime, not just under TYPE_CHECKING.
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
@@ -80,8 +74,6 @@ include = ["src", "tests"]
 pythonVersion = "3.12"
 pythonPlatform = "Linux"
 typeCheckingMode = "strict"
-# Several KDE-adjacent libraries (dbus-next, akonadi bindings) ship partial stubs;
-# don't make missing stubs a hard fail.
 reportMissingTypeStubs = "warning"
 
 [tool.pytest.ini_options]
