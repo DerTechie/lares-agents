@@ -2718,11 +2718,11 @@ QString extractBody(const KMime::Message::Ptr &msg)
 {
     auto *plain = msg->mainBodyPart("text/plain");
     if (plain) {
-        return plain->decodedText(/* trimText */ false, /* removeTrailingNewlines */ false);
+        return plain->decodedText(KMime::Content::NoTrim);
     }
     auto *html = msg->mainBodyPart("text/html");
     if (html) {
-        const QString rawHtml = html->decodedText(false, false);
+        const QString rawHtml = html->decodedText(KMime::Content::NoTrim);
         return QTextDocumentFragment::fromHtml(rawHtml).toPlainText();
     }
     return QString();
@@ -2893,20 +2893,30 @@ int main(int argc, char **argv)
 }
 ```
 
-- [ ] **Step 3: Add KMime dep — only on the mutate target**
+- [ ] **Step 3: Add KMime + Qt6 Gui dep — only on the mutate target**
 
-`KPim6Akonadi` does not pull in KMime automatically; `mutate.cpp` uses `KMime::Message` and `KMime::Headers::Base`. Edit `src/akonadi_bridge/CMakeLists.txt`:
+`KPim6Akonadi` does not pull in KMime automatically; `mutate.cpp` uses `KMime::Message` and `KMime::Headers::Base`. The HTML-fallback path in `extractBody()` also needs `QTextDocumentFragment::fromHtml(...)`, which lives in `Qt6::Gui` — not picked up by `Qt6::Core` from Task 12. Edit `src/akonadi_bridge/CMakeLists.txt`:
 
-1. Near the existing `find_package` lines, add:
+1. Extend the existing Qt6 find_package line. Change:
+   ```cmake
+   find_package(Qt6 REQUIRED COMPONENTS Core DBus)
+   ```
+   to:
+   ```cmake
+   find_package(Qt6 REQUIRED COMPONENTS Core DBus Gui)
+   ```
+   (The notify target does not link `Qt6::Gui`; listing it in `COMPONENTS` only imports the target so we can link from the mutate target.)
+2. Near the existing `find_package` lines, add:
    ```cmake
    find_package(KPim6Mime REQUIRED)
    ```
-2. **Only** the mutate target gets `KPim6::Mime`. Update its `target_link_libraries` block (do NOT modify the notify target's block):
+3. **Only** the mutate target gets `Qt6::Gui` and `KPim6::Mime`. Update its `target_link_libraries` block (do NOT modify the notify target's block):
    ```cmake
    target_link_libraries(lares-akonadi-mutate
        PRIVATE
            Qt6::Core
            Qt6::DBus
+           Qt6::Gui
            KPim6::AkonadiCore
            KPim6::Mime
    )
